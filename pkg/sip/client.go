@@ -16,7 +16,6 @@ package sip
 
 import (
 	"context"
-	"log/slog"
 	"net/netip"
 	"strings"
 	"sync"
@@ -25,13 +24,13 @@ import (
 	"github.com/frostbyte73/core"
 	"golang.org/x/exp/maps"
 
+	"github.com/emiago/sipgo"
+	"github.com/emiago/sipgo/sip"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/rpc"
 	"github.com/livekit/protocol/tracer"
 	"github.com/livekit/psrpc"
-	"github.com/livekit/sipgo"
-	"github.com/livekit/sipgo/sip"
 
 	"github.com/livekit/sip/pkg/config"
 	siperrors "github.com/livekit/sip/pkg/errors"
@@ -79,7 +78,7 @@ func (c *Client) Start(agent *sipgo.UserAgent, sc *ServiceConfig) error {
 	if agent == nil {
 		ua, err := sipgo.NewUA(
 			sipgo.WithUserAgent(UserAgent),
-			sipgo.WithUserAgentLogger(slog.New(logger.ToSlogHandler(c.log))),
+			// WithUserAgentLogger doesn't exist in emiago/sipgo
 		)
 		if err != nil {
 			return err
@@ -90,7 +89,7 @@ func (c *Client) Start(agent *sipgo.UserAgent, sc *ServiceConfig) error {
 	var err error
 	c.sipCli, err = sipgo.NewClient(agent,
 		sipgo.WithClientHostname(c.sconf.SignalingIP.String()),
-		sipgo.WithClientLogger(slog.New(logger.ToSlogHandler(c.log))),
+		// WithClientLogger requires zerolog.Logger, not slog.Logger - removed for compatibility
 	)
 	if err != nil {
 		return err

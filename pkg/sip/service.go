@@ -17,7 +17,6 @@ package sip
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/netip"
 	"strings"
@@ -27,11 +26,11 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/emiago/sipgo"
 	msdk "github.com/livekit/media-sdk"
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/rpc"
 	"github.com/livekit/psrpc"
-	"github.com/livekit/sipgo"
 
 	"github.com/livekit/sip/pkg/config"
 	"github.com/livekit/sip/pkg/stats"
@@ -196,7 +195,7 @@ func (s *Service) Start() error {
 	// to pass even without forwarding rules on the firewall. ut it will inevitably fail later on follow-up requests like BYE.
 	ua, err := sipgo.NewUA(
 		sipgo.WithUserAgent(UserAgent),
-		sipgo.WithUserAgentLogger(slog.New(logger.ToSlogHandler(s.log))),
+		// WithUserAgentLogger doesn't exist in emiago/sipgo
 	)
 	if err != nil {
 		return err

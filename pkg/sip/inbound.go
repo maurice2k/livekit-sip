@@ -32,6 +32,7 @@ import (
 	"github.com/icholy/digest"
 	"github.com/pkg/errors"
 
+	"github.com/emiago/sipgo/sip"
 	"github.com/livekit/media-sdk/dtmf"
 	"github.com/livekit/media-sdk/rtp"
 	"github.com/livekit/media-sdk/sdp"
@@ -42,7 +43,6 @@ import (
 	"github.com/livekit/protocol/tracer"
 	"github.com/livekit/psrpc"
 	lksdk "github.com/livekit/server-sdk-go/v2"
-	"github.com/livekit/sipgo/sip"
 
 	"github.com/livekit/sip/pkg/config"
 	"github.com/livekit/sip/pkg/stats"
@@ -1196,18 +1196,23 @@ func (c *sipInbound) StartRinging() {
 	stop := make(chan struct{})
 	c.ringing = stop
 	tx := c.inviteTx
-	cancels := tx.Cancels()
+
+	// Use OnCancel callback instead of Cancels() channel
+	// Type cast to concrete type to access OnCancel method
+	if serverTx, ok := tx.(*sip.ServerTx); ok {
+		serverTx.OnCancel(func(r *sip.Request) {
+			close(c.cancelled)
+			_ = tx.Respond(sip.NewResponseFromRequest(r, sip.StatusOK, "OK", nil))
+			c.RespondAndDrop(sip.StatusRequestTerminated, "Request Terminated")
+		})
+	}
+
 	go func() {
 		ticker := time.NewTicker(c.s.conf.SIPRingingInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-stop:
-				return
-			case r := <-cancels:
-				close(c.cancelled)
-				_ = tx.Respond(sip.NewResponseFromRequest(r, sip.StatusOK, "OK", nil))
-				c.RespondAndDrop(sip.StatusRequestTerminated, "Request Terminated")
 				return
 			case <-ticker.C:
 			}
@@ -1337,7 +1342,7 @@ func (c *sipInbound) sendBye() {
 	_, span := tracer.Start(ctx, "sipInbound.sendBye")
 	defer span.End()
 	// This function is for clients, so we need to swap src and dest
-	r := sip.NewByeRequest(c.invite, c.inviteOk, nil)
+	r := newByeRequestUAC(c.invite, c.inviteOk, nil)
 	if c.setHeaders != nil {
 		for k, v := range c.setHeaders(nil) {
 			r.AppendHeader(sip.NewHeader(k, v))
@@ -1379,7 +1384,54 @@ func (c *sipInbound) WriteRequest(req *sip.Request) error {
 }
 
 func (c *sipInbound) Transaction(req *sip.Request) (sip.ClientTransaction, error) {
-	return c.s.sipSrv.TransactionLayer().Request(req)
+	return c.s.sipSrv.TransactionLayer().Request(context.Background(), req)
+}
+
+// newByeRequestUAC creates bye request from established dialog
+// Based on emiago/sipgo/dialog_client.go
+func newByeRequestUAC(inviteRequest *sip.Request, inviteResponse *sip.Response, body []byte) *sip.Request {
+	recipient := &inviteRequest.Recipient
+	cont := inviteResponse.Contact()
+	if cont != nil {
+		// BYE is subsequent request
+		recipient = &cont.Address
+	}
+
+	byeRequest := sip.NewRequest(
+		sip.BYE,
+		*recipient.Clone(),
+	)
+	byeRequest.SipVersion = inviteRequest.SipVersion
+
+	if len(inviteRequest.GetHeaders("Route")) > 0 {
+		sip.CopyHeaders("Route", inviteRequest, byeRequest)
+	}
+
+	maxForwardsHeader := sip.MaxForwardsHeader(70)
+	byeRequest.AppendHeader(&maxForwardsHeader)
+	if h := inviteRequest.From(); h != nil {
+		byeRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	if h := inviteResponse.To(); h != nil {
+		byeRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	if h := inviteRequest.CallID(); h != nil {
+		byeRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	if h := inviteRequest.CSeq(); h != nil {
+		byeRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	cseq := byeRequest.CSeq()
+	cseq.MethodName = sip.BYE
+
+	byeRequest.SetBody(body)
+	byeRequest.SetTransport(inviteRequest.Transport())
+	byeRequest.SetSource(inviteRequest.Source())
+	return byeRequest
 }
 
 func (c *sipInbound) newReferReq(transferTo string, headers map[string]string) (*sip.Request, error) {

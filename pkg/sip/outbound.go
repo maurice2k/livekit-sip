@@ -29,6 +29,7 @@ import (
 
 	msdk "github.com/livekit/media-sdk"
 
+	"github.com/emiago/sipgo/sip"
 	"github.com/livekit/media-sdk/dtmf"
 	"github.com/livekit/media-sdk/sdp"
 	"github.com/livekit/media-sdk/tones"
@@ -38,7 +39,6 @@ import (
 	"github.com/livekit/protocol/utils/guid"
 	"github.com/livekit/psrpc"
 	lksdk "github.com/livekit/server-sdk-go/v2"
-	"github.com/livekit/sipgo/sip"
 
 	"github.com/livekit/sip/pkg/config"
 	"github.com/livekit/sip/pkg/stats"
@@ -438,10 +438,10 @@ func sipResponse(ctx context.Context, tx sip.ClientTransaction, stop <-chan stru
 	for {
 		select {
 		case <-ctx.Done():
-			_ = tx.Cancel()
+			tx.Terminate()
 			return nil, psrpc.NewErrorf(psrpc.Canceled, "canceled")
 		case <-stop:
-			_ = tx.Cancel()
+			tx.Terminate()
 			return nil, psrpc.NewErrorf(psrpc.Canceled, "canceled")
 		case <-tx.Done():
 			return nil, psrpc.NewErrorf(psrpc.Canceled, "transaction failed to complete (%d intermediate responses)", cnt)
@@ -896,7 +896,7 @@ func (c *sipOutbound) attemptInvite(ctx context.Context, callID sip.CallIDHeader
 		req.AppendHeader(h)
 	}
 
-	tx, err := c.c.sipCli.TransactionRequest(req)
+	tx, err := c.c.sipCli.TransactionRequest(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -911,7 +911,7 @@ func (c *sipOutbound) WriteRequest(req *sip.Request) error {
 }
 
 func (c *sipOutbound) Transaction(req *sip.Request) (sip.ClientTransaction, error) {
-	return c.c.sipCli.TransactionRequest(req)
+	return c.c.sipCli.TransactionRequest(context.Background(), req)
 }
 
 func (c *sipOutbound) setCSeq(req *sip.Request) {
@@ -927,7 +927,7 @@ func (c *sipOutbound) sendBye() {
 	ctx := context.Background()
 	_, span := tracer.Start(ctx, "sipOutbound.sendBye")
 	defer span.End()
-	r := sip.NewByeRequest(c.invite, c.inviteOk, nil)
+	r := newByeRequestUAC(c.invite, c.inviteOk, nil)
 	r.AppendHeader(sip.NewHeader("User-Agent", "LiveKit"))
 	if c.getHeaders != nil {
 		for k, v := range c.getHeaders(nil) {

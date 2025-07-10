@@ -6,6 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/at-wat/ebml-go v0.17.1
+	github.com/emiago/sipgo v0.24.1
 	github.com/frostbyte73/core v0.1.1
 	github.com/icholy/digest v1.1.0
 	github.com/jfreymuth/oggvorbis v1.0.5
@@ -15,7 +16,6 @@ require (
 	github.com/livekit/protocol v1.39.4-0.20250626001605-256d96948009
 	github.com/livekit/psrpc v0.6.1-0.20250511053145-465289d72c3c
 	github.com/livekit/server-sdk-go/v2 v2.9.2-0.20250606164215-22b67ed30bd9
-	github.com/livekit/sipgo v0.13.2-0.20250601220430-a77cc3f220fb
 	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12
 	github.com/ory/dockertest/v3 v3.12.0
 	github.com/pion/interceptor v0.1.37
@@ -55,7 +55,6 @@ require (
 	github.com/docker/docker v27.1.1+incompatible // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/emiago/sipgo v0.24.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gammazero/deque v1.0.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.4 // indirect

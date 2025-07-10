@@ -11,12 +11,12 @@ import (
 	msdk "github.com/livekit/media-sdk"
 	"github.com/stretchr/testify/require"
 
+	"github.com/emiago/sipgo"
+	"github.com/emiago/sipgo/sip"
 	"github.com/livekit/mediatransportutil/pkg/rtcconfig"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/rpc"
-	"github.com/livekit/sipgo"
-	"github.com/livekit/sipgo/sip"
 
 	"github.com/livekit/media-sdk/sdp"
 

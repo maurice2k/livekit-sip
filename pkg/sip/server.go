@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/netip"
 	"sync"
@@ -30,12 +29,12 @@ import (
 	"github.com/icholy/digest"
 	"golang.org/x/exp/maps"
 
+	"github.com/emiago/sipgo"
+	"github.com/emiago/sipgo/sip"
 	msdk "github.com/livekit/media-sdk"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/rpc"
-	"github.com/livekit/sipgo"
-	"github.com/livekit/sipgo/sip"
 
 	"github.com/livekit/sip/pkg/config"
 	"github.com/livekit/sip/pkg/stats"
@@ -249,7 +248,7 @@ func (s *Server) Start(agent *sipgo.UserAgent, sc *ServiceConfig, unhandled Requ
 	if agent == nil {
 		ua, err := sipgo.NewUA(
 			sipgo.WithUserAgent(UserAgent),
-			sipgo.WithUserAgentLogger(slog.New(logger.ToSlogHandler(s.log))),
+			// WithUserAgentLogger doesn't exist in emiago/sipgo
 		)
 		if err != nil {
 			return err
@@ -258,22 +257,32 @@ func (s *Server) Start(agent *sipgo.UserAgent, sc *ServiceConfig, unhandled Requ
 	}
 
 	var err error
-	s.sipSrv, err = sipgo.NewServer(agent,
-		sipgo.WithServerLogger(slog.New(logger.ToSlogHandler(s.log))),
-	)
+	s.sipSrv, err = sipgo.NewServer(agent) // WithServerLogger requires zerolog.Logger, not slog.Logger - removed for compatibility
+
 	if err != nil {
 		return err
 	}
 
-	s.sipSrv.OnOptions(s.onOptions)
-	s.sipSrv.OnInvite(s.onInvite)
-	s.sipSrv.OnBye(s.onBye)
-	s.sipSrv.OnNotify(s.onNotify)
-	s.sipSrv.OnNoRoute(s.OnNoRoute)
+	// Create wrapper functions to match the expected RequestHandler signature
+	s.sipSrv.OnOptions(func(req *sip.Request, tx sip.ServerTransaction) {
+		s.onOptions(nil, req, tx)
+	})
+	s.sipSrv.OnInvite(func(req *sip.Request, tx sip.ServerTransaction) {
+		s.onInvite(nil, req, tx)
+	})
+	s.sipSrv.OnBye(func(req *sip.Request, tx sip.ServerTransaction) {
+		s.onBye(nil, req, tx)
+	})
+	s.sipSrv.OnNotify(func(req *sip.Request, tx sip.ServerTransaction) {
+		s.onNotify(nil, req, tx)
+	})
+	s.sipSrv.OnNoRoute(func(req *sip.Request, tx sip.ServerTransaction) {
+		s.OnNoRoute(nil, req, tx)
+	})
 	s.sipUnhandled = unhandled
 
 	// Ignore ACKs
-	s.sipSrv.OnAck(func(log *slog.Logger, req *sip.Request, tx sip.ServerTransaction) {})
+	s.sipSrv.OnAck(func(req *sip.Request, tx sip.ServerTransaction) {})
 	listenIP := s.conf.ListenIP
 	if listenIP == "" {
 		listenIP = "0.0.0.0"

@@ -25,9 +25,9 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/emiago/sipgo/sip"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/psrpc"
-	"github.com/livekit/sipgo/sip"
 
 	"github.com/livekit/sip/pkg/config"
 )

@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	sipgo "github.com/emiago/sipgo/sip"
 	"github.com/livekit/media-sdk/dtmf"
 	"github.com/livekit/media-sdk/g711"
 	"github.com/livekit/media-sdk/g722"
@@ -24,7 +25,6 @@ import (
 	"github.com/livekit/protocol/utils"
 	"github.com/livekit/psrpc"
 	lksdk "github.com/livekit/server-sdk-go/v2"
-	sipgo "github.com/livekit/sipgo/sip"
 
 	"github.com/livekit/sip/pkg/config"
 	"github.com/livekit/sip/pkg/service"
