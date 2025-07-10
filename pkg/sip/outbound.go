@@ -431,7 +431,7 @@ func (c *outboundCall) connectMedia() {
 	c.media.HandleDTMF(c.handleDTMF)
 }
 
-type sipRespFunc func(code sip.StatusCode, hdrs Headers)
+type sipRespFunc func(code int, hdrs Headers)
 
 func sipResponse(ctx context.Context, tx sip.ClientTransaction, stop <-chan struct{}, setState sipRespFunc) (*sip.Response, error) {
 	cnt := 0
@@ -530,7 +530,7 @@ func (c *outboundCall) sipSignal(ctx context.Context) error {
 	toUri := CreateURIFromUserAndAddress(c.sipConf.to, c.sipConf.address, TransportFrom(c.sipConf.transport))
 
 	ringing := false
-	sdpResp, err := c.cc.Invite(ctx, toUri, c.sipConf.user, c.sipConf.pass, c.sipConf.headers, sdpOfferData, func(code sip.StatusCode, hdrs Headers) {
+	sdpResp, err := c.cc.Invite(ctx, toUri, c.sipConf.user, c.sipConf.pass, c.sipConf.headers, sdpOfferData, func(code int, hdrs Headers) {
 		if code == sip.StatusOK {
 			return // is set separately
 		}
@@ -869,7 +869,7 @@ func (c *sipOutbound) AckInviteOK(ctx context.Context) error {
 	if c.invite == nil || c.inviteOk == nil {
 		return errors.New("call already closed")
 	}
-	return c.c.sipCli.WriteRequest(sip.NewAckRequest(c.invite, c.inviteOk, nil))
+	return c.c.sipCli.WriteRequest(newAckRequest(c.invite, c.inviteOk, nil))
 }
 
 func (c *sipOutbound) attemptInvite(ctx context.Context, callID sip.CallIDHeader, dest string, to *sip.ToHeader, offer []byte, authHeaderName, authHeader string, headers Headers, setState sipRespFunc) (*sip.Request, *sip.Response, error) {

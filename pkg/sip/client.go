@@ -16,6 +16,7 @@ package sip
 
 import (
 	"context"
+	"log/slog"
 	"net/netip"
 	"strings"
 	"sync"
@@ -89,7 +90,7 @@ func (c *Client) Start(agent *sipgo.UserAgent, sc *ServiceConfig) error {
 	var err error
 	c.sipCli, err = sipgo.NewClient(agent,
 		sipgo.WithClientHostname(c.sconf.SignalingIP.String()),
-		// WithClientLogger requires zerolog.Logger, not slog.Logger - removed for compatibility
+		sipgo.WithClientLogger(slog.New(logger.ToSlogHandler(c.log))),
 	)
 	if err != nil {
 		return err

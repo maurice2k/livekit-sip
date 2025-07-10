@@ -1112,7 +1112,7 @@ func (c *sipInbound) drop() {
 	c.nextRequestCSeq = 0
 }
 
-func (c *sipInbound) respond(status sip.StatusCode, reason string) {
+func (c *sipInbound) respond(status int, reason string) {
 	if c.inviteTx == nil {
 		return
 	}
@@ -1123,7 +1123,7 @@ func (c *sipInbound) respond(status sip.StatusCode, reason string) {
 	_ = c.inviteTx.Respond(resp)
 }
 
-func (c *sipInbound) RespondAndDrop(status sip.StatusCode, reason string) {
+func (c *sipInbound) RespondAndDrop(status int, reason string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stopRinging()
@@ -1355,7 +1355,7 @@ func (c *sipInbound) sendBye() {
 	sendAndACK(ctx, c, r)
 }
 
-func (c *sipInbound) sendStatus(code sip.StatusCode, status string) {
+func (c *sipInbound) sendStatus(code int, status string) {
 	if c.inviteOk != nil {
 		return // call already established
 	}
@@ -1385,6 +1385,66 @@ func (c *sipInbound) WriteRequest(req *sip.Request) error {
 
 func (c *sipInbound) Transaction(req *sip.Request) (sip.ClientTransaction, error) {
 	return c.s.sipSrv.TransactionLayer().Request(context.Background(), req)
+}
+
+// newAckRequest creates ACK request from INVITE request and response
+// Based on emiago/sipgo/sip/request.go newAckRequestNon2xx
+func newAckRequest(inviteRequest *sip.Request, inviteResponse *sip.Response, body []byte) *sip.Request {
+	recipient := &inviteRequest.Recipient
+	ackRequest := sip.NewRequest(
+		sip.ACK,
+		*recipient.Clone(),
+	)
+	ackRequest.SipVersion = inviteRequest.SipVersion
+
+	// The ACK MUST contain a single Via header field, and
+	// this MUST be equal to the top Via header field of the original
+	// request.
+	sip.CopyHeaders("Via", inviteRequest, ackRequest)
+
+	if len(inviteRequest.GetHeaders("Route")) > 0 {
+		sip.CopyHeaders("Route", inviteRequest, ackRequest)
+	} else {
+		// https://datatracker.ietf.org/doc/html/rfc2543#section-6.29
+		hdrs := inviteResponse.GetHeaders("Record-Route")
+		for i := len(hdrs) - 1; i >= 0; i-- {
+			recordRoute := hdrs[i]
+			ackRequest.AppendHeader(sip.NewHeader("Route", recordRoute.Value()))
+		}
+	}
+
+	maxForwardsHeader := sip.MaxForwardsHeader(70)
+	ackRequest.AppendHeader(&maxForwardsHeader)
+	if h := inviteRequest.From(); h != nil {
+		ackRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	if h := inviteResponse.To(); h != nil {
+		ackRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	if h := inviteRequest.CallID(); h != nil {
+		ackRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	if h := inviteRequest.CSeq(); h != nil {
+		ackRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	// Seq header field in the ACK MUST contain the same
+	// value for the sequence number as was present in the original request,
+	// but the method parameter MUST be equal to "ACK"
+	cseq := ackRequest.CSeq()
+	cseq.MethodName = sip.ACK
+
+	if h := inviteRequest.Contact(); h != nil {
+		ackRequest.AppendHeader(sip.HeaderClone(h))
+	}
+
+	ackRequest.SetBody(body)
+	ackRequest.SetTransport(inviteRequest.Transport())
+	ackRequest.SetSource(inviteRequest.Source())
+	return ackRequest
 }
 
 // newByeRequestUAC creates bye request from established dialog
@@ -1531,7 +1591,7 @@ func (c *sipInbound) Close() {
 }
 
 // CloseWithStatus the inbound call cleanly. Depending on the call state it either sends BYE or terminates INVITE with a specified status.
-func (c *sipInbound) CloseWithStatus(code sip.StatusCode, status string) {
+func (c *sipInbound) CloseWithStatus(code int, status string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.inviteOk != nil {

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/netip"
 	"sync"
@@ -248,7 +249,7 @@ func (s *Server) Start(agent *sipgo.UserAgent, sc *ServiceConfig, unhandled Requ
 	if agent == nil {
 		ua, err := sipgo.NewUA(
 			sipgo.WithUserAgent(UserAgent),
-			// WithUserAgentLogger doesn't exist in emiago/sipgo
+			// WithUserAgentLogger doesn't exist in emiago/sipgo v0.33.0
 		)
 		if err != nil {
 			return err
@@ -257,7 +258,9 @@ func (s *Server) Start(agent *sipgo.UserAgent, sc *ServiceConfig, unhandled Requ
 	}
 
 	var err error
-	s.sipSrv, err = sipgo.NewServer(agent) // WithServerLogger requires zerolog.Logger, not slog.Logger - removed for compatibility
+	s.sipSrv, err = sipgo.NewServer(agent,
+		sipgo.WithServerLogger(slog.New(logger.ToSlogHandler(s.log))),
+	)
 
 	if err != nil {
 		return err

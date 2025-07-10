@@ -98,11 +98,11 @@ var statusNamesMap = map[int]string{
 	606: "GlobalNotAcceptable",
 }
 
-func sipStatus(code sip.StatusCode) string {
-	if name := statusNamesMap[int(code)]; name != "" {
+func sipStatus(code int) string {
+	if name := statusNamesMap[code]; name != "" {
 		return name
 	}
-	return fmt.Sprintf("Status%d", int(code))
+	return fmt.Sprintf("Status%d", code)
 }
 
 func statusName(status int) string {
@@ -173,7 +173,7 @@ func sendAndACK(ctx context.Context, c Signaling, req *sip.Request) {
 		return
 	}
 	if r.StatusCode == 200 {
-		_ = c.WriteRequest(sip.NewAckRequest(req, r, nil))
+		_ = c.WriteRequest(newAckRequest(req, r, nil))
 	}
 }
 
@@ -315,7 +315,7 @@ func handleNotify(req *sip.Request) (method sip.RequestMethod, cseq uint32, stat
 	return "", 0, 0, psrpc.NewErrorf(psrpc.Unimplemented, "unknown event")
 }
 
-func sipStatusForErrorCode(code psrpc.ErrorCode) sip.StatusCode {
+func sipStatusForErrorCode(code psrpc.ErrorCode) int {
 	switch code {
 	case psrpc.OK:
 		return sip.StatusOK
@@ -350,7 +350,7 @@ func sipStatusForErrorCode(code psrpc.ErrorCode) sip.StatusCode {
 	}
 }
 
-func sipCodeAndMessageFromError(err error) (code sip.StatusCode, msg string) {
+func sipCodeAndMessageFromError(err error) (code int, msg string) {
 	code = 200
 	var psrpcErr psrpc.Error
 	if errors.As(err, &psrpcErr) {

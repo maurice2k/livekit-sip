@@ -195,7 +195,7 @@ func (s *Service) Start() error {
 	// to pass even without forwarding rules on the firewall. ut it will inevitably fail later on follow-up requests like BYE.
 	ua, err := sipgo.NewUA(
 		sipgo.WithUserAgent(UserAgent),
-		// WithUserAgentLogger doesn't exist in emiago/sipgo
+		// WithUserAgentLogger doesn't exist in emiago/sipgo v0.33.0
 	)
 	if err != nil {
 		return err

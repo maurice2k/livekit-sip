@@ -85,7 +85,7 @@ func (v CallStatus) DisconnectReason() livekit.DisconnectReason {
 	}
 }
 
-func (v CallStatus) SIPStatus() (sip.StatusCode, string) {
+func (v CallStatus) SIPStatus() (int, string) {
 	switch v {
 	default:
 		return sip.StatusBusyHere, "Rejected"
