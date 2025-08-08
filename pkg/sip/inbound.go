@@ -16,6 +16,8 @@ package sip
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math"
@@ -55,53 +57,111 @@ const (
 	audioBridgeMaxDelay = 1 * time.Second
 )
 
-func (s *Server) getInvite(from string) *inProgressInvite {
+// hashPassword creates a SHA256 hash of the password for logging purposes
+func hashPassword(password string) string {
+	if password == "" {
+		return "<empty>"
+	}
+	hash := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(hash[:8]) // Use first 8 bytes for shorter hash
+}
+
+func (s *Server) getInvite(sipCallID string) *inProgressInvite {
 	s.imu.Lock()
 	defer s.imu.Unlock()
 	for i := range s.inProgressInvites {
-		if s.inProgressInvites[i].from == from {
+		if s.inProgressInvites[i].sipCallID == sipCallID {
 			return s.inProgressInvites[i]
 		}
 	}
 	if len(s.inProgressInvites) >= digestLimit {
 		s.inProgressInvites = s.inProgressInvites[1:]
 	}
-	is := &inProgressInvite{from: from}
+	is := &inProgressInvite{sipCallID: sipCallID}
 	s.inProgressInvites = append(s.inProgressInvites, is)
 	return is
 }
 
 func (s *Server) handleInviteAuth(log logger.Logger, req *sip.Request, tx sip.ServerTransaction, from, username, password string) (ok bool) {
+	log = log.WithValues(
+		"username", username,
+		"passwordHash", hashPassword(password),
+		"method", req.Method.String(),
+		"uri", req.Recipient.String(),
+	)
+
+	log.Infow("Starting SIP invite authentication")
+
 	if username == "" || password == "" {
+		log.Debugw("Skipping authentication - no credentials provided")
 		return true
 	}
+
 	if s.conf.HideInboundPort {
 		// We will send password request anyway, so might as well signal that the progress is made.
+		log.Debugw("Sending processing response due to HideInboundPort config")
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 100, "Processing", nil))
 	}
 
-	inviteState := s.getInvite(from)
+	// Extract SIP Call ID for tracking in-progress invites
+	sipCallID := ""
+	if h := req.CallID(); h != nil {
+		sipCallID = h.Value()
+	}
+	inviteState := s.getInvite(sipCallID)
+	log = log.WithValues("inviteStateSipCallID", sipCallID)
 
 	h := req.GetHeader("Proxy-Authorization")
 	if h == nil {
-		log.Infow("Requesting inbound auth")
 		inviteState.challenge = digest.Challenge{
 			Realm:     UserAgent,
 			Nonce:     fmt.Sprintf("%d", time.Now().UnixMicro()),
 			Algorithm: "MD5",
 		}
 
+		log.Debugw("Created digest challenge",
+			"realm", inviteState.challenge.Realm,
+			"nonce", inviteState.challenge.Nonce,
+			"algorithm", inviteState.challenge.Algorithm,
+		)
+
 		res := sip.NewResponseFromRequest(req, 407, "Unauthorized", nil)
 		res.AppendHeader(sip.NewHeader("Proxy-Authenticate", inviteState.challenge.String()))
 		_ = tx.Respond(res)
+		log.Infow("No Proxy header found. Sending 407 Unauthorized response with Proxy-Authenticate header")
 		return false
 	}
 
+	log.Debugw("Found Proxy-Authorization header, parsing credentials")
 	cred, err := digest.ParseCredentials(h.Value())
 	if err != nil {
+		log.Warnw("Failed to parse Proxy-Authorization credentials", err,
+			"headerValue", h.Value(),
+		)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 401, "Bad credentials", nil))
 		return false
 	}
+
+	// Set credURI and credUsername in logger early to avoid repetitive logging
+	log = log.WithValues("credURI", cred.URI, "credUsername", cred.Username)
+
+	log.Debugw("Parsed credentials successfully", "cred", cred)
+
+	// Check if we have a valid challenge state
+	if inviteState.challenge.Realm == "" {
+		log.Warnw("No challenge state found for authentication attempt", errors.New("missing challenge state"),
+			"sipCallID", sipCallID,
+			"expectedRealm", UserAgent,
+		)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 401, "Bad credentials", nil))
+		return false
+	}
+
+	log.Debugw("Computing digest response",
+		"challengeRealm", inviteState.challenge.Realm,
+		"challengeNonce", inviteState.challenge.Nonce,
+		"challengeAlgorithm", inviteState.challenge.Algorithm,
+	)
 
 	digCred, err := digest.Digest(&inviteState.challenge, digest.Options{
 		Method:   req.Method.String(),
@@ -111,15 +171,27 @@ func (s *Server) handleInviteAuth(log logger.Logger, req *sip.Request, tx sip.Se
 	})
 
 	if err != nil {
+		log.Warnw("Failed to compute digest response", err)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 401, "Bad credentials", nil))
 		return false
 	}
 
+	log.Debugw("Digest computation completed",
+		"expectedResponse", digCred.Response,
+		"receivedResponse", cred.Response,
+		"responsesMatch", cred.Response == digCred.Response,
+	)
+
 	if cred.Response != digCred.Response {
+		log.Warnw("Authentication failed - response mismatch", errors.New("response mismatch"),
+			"expectedResponse", digCred.Response,
+			"receivedResponse", cred.Response,
+		)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 401, "Unauthorized", nil))
 		return false
 	}
 
+	log.Infow("SIP invite authentication successful")
 	return true
 }
 
@@ -199,12 +271,19 @@ func (s *Server) processInvite(req *sip.Request, tx sip.ServerTransaction) (retE
 		cc.Processing()
 	}
 
+	// Extract SIP Call ID directly from the request
+	sipCallID := ""
+	if h := req.CallID(); h != nil {
+		sipCallID = h.Value()
+	}
+
 	callInfo := &rpc.SIPCall{
-		LkCallId: callID,
-		SourceIp: src.Addr().String(),
-		Address:  ToSIPUri("", cc.Address()),
-		From:     ToSIPUri("", from),
-		To:       ToSIPUri("", to),
+		LkCallId:  callID,
+		SipCallId: sipCallID,
+		SourceIp:  src.Addr().String(),
+		Address:   ToSIPUri("", cc.Address()),
+		From:      ToSIPUri("", from),
+		To:        ToSIPUri("", to),
 	}
 	for _, h := range cc.RemoteHeaders() {
 		switch h := h.(type) {
@@ -262,7 +341,7 @@ func (s *Server) processInvite(req *sip.Request, tx sip.ServerTransaction) (retE
 		if !s.handleInviteAuth(log, req, tx, from.User, r.Username, r.Password) {
 			cmon.InviteErrorShort("unauthorized")
 			// handleInviteAuth will generate the SIP Response as needed
-			return psrpc.NewErrorf(psrpc.PermissionDenied, "invalid crendentials were provided")
+			return psrpc.NewErrorf(psrpc.PermissionDenied, "invalid credentials were provided")
 		}
 		fallthrough
 	case AuthAccept:
@@ -1083,14 +1162,17 @@ type sipInbound struct {
 }
 
 func (c *sipInbound) ValidateInvite() error {
+	if c.callID == "" {
+		return errors.New("no Call-ID header in INVITE")
+	}
 	if c.from == nil {
-		return errors.New("no From header")
+		return errors.New("no From header in INVITE")
 	}
 	if c.to == nil {
-		return errors.New("no To header")
+		return errors.New("no To header in INVITE")
 	}
 	if c.tag == "" {
-		return errors.New("no tag in From")
+		return errors.New("no tag in From in INVITE")
 	}
 	return nil
 }
@@ -1117,10 +1199,10 @@ func (c *sipInbound) respond(status int, reason string) {
 		return
 	}
 
-	resp := sip.NewResponseFromRequest(c.invite, status, reason, nil)
-	resp.AppendHeader(sip.NewHeader("Allow", "INVITE, ACK, CANCEL, BYE, NOTIFY, REFER, MESSAGE, OPTIONS, INFO, SUBSCRIBE"))
-
-	_ = c.inviteTx.Respond(resp)
+	r := sip.NewResponseFromRequest(c.invite, status, reason, nil)
+	r.AppendHeader(sip.NewHeader("Allow", "INVITE, ACK, CANCEL, BYE, NOTIFY, REFER, MESSAGE, OPTIONS, INFO, SUBSCRIBE"))
+	c.addExtraHeaders(r)
+	_ = c.inviteTx.Respond(r)
 }
 
 func (c *sipInbound) RespondAndDrop(status int, reason string) {
@@ -1249,6 +1331,20 @@ func (c *sipInbound) setDestFromVia(r *sip.Response) {
 	}
 }
 
+func (c *sipInbound) addExtraHeaders(r *sip.Response) {
+	if c.s.conf.AddRecordRoute {
+		// Other in-dialog requests should be sent to this instance as well.
+		recordRoute := c.contact.Address.Clone()
+		if recordRoute.UriParams == nil {
+			recordRoute.UriParams = sip.HeaderParams{}
+		}
+		recordRoute.UriParams.Add("lr", "")
+		r.PrependHeader(&sip.RecordRouteHeader{
+			Address: *recordRoute,
+		})
+	}
+}
+
 func (c *sipInbound) Accept(ctx context.Context, sdpData []byte, headers map[string]string) error {
 	ctx, span := tracer.Start(ctx, "sipInbound.Accept")
 	defer span.End()
@@ -1261,6 +1357,8 @@ func (c *sipInbound) Accept(ctx context.Context, sdpData []byte, headers map[str
 
 	// This will effectively redirect future SIP requests to this server instance (if host address is not LB).
 	r.AppendHeader(c.contact)
+
+	c.addExtraHeaders(r)
 
 	c.setDestFromVia(r)
 

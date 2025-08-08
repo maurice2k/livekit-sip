@@ -777,16 +777,22 @@ authLoop:
 		case sip.StatusOK:
 			break authLoop
 		default:
-			return nil, fmt.Errorf("unexpected status from INVITE response: %w", &livekit.SIPStatus{Code: livekit.SIPStatusCode(resp.StatusCode)})
+			return nil, fmt.Errorf("unexpected status from INVITE response: %w", &livekit.SIPStatus{
+				Code:   livekit.SIPStatusCode(resp.StatusCode),
+				Status: resp.Reason,
+			})
 		case sip.StatusBadRequest,
 			sip.StatusNotFound,
 			sip.StatusTemporarilyUnavailable,
 			sip.StatusNotAcceptableHere,
 			sip.StatusBusyHere:
-			err := &livekit.SIPStatus{Code: livekit.SIPStatusCode(resp.StatusCode)}
+			err := &livekit.SIPStatus{
+				Code:   livekit.SIPStatusCode(resp.StatusCode),
+				Status: resp.Reason,
+			}
 			if body := resp.Body(); len(body) != 0 {
 				err.Status = string(body)
-			} else if s := resp.GetHeader("X-Twillio-Error"); s != nil {
+			} else if s := resp.GetHeader("X-Twilio-Error"); s != nil {
 				err.Status = s.Value()
 			}
 			return nil, fmt.Errorf("INVITE failed: %w", err)
